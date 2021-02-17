@@ -75,15 +75,16 @@ def run_vqe(H):
     opt = qml.GradientDescentOptimizer(stepsize=0.1)
 
     max_iterations = 500
-    rel_conv_tol = 1e-05
+    rel_conv_tol = 1e-06
 
     for n in range(max_iterations):
         params, prev_energy = opt.step_and_cost(cost_fn, params)
         energy = cost_fn(params)
         conv = np.abs((energy - prev_energy) / energy)
 
-        if n % 20 == 0:
-            print('Iteration = {:},  Energy = {:.8f} Ha'.format(n, energy))
+        ## DEBUG PRINT
+        # if n % 20 == 0:
+        #     print('Iteration = {:},  Energy = {:.8f} Ha'.format(n, energy))
 
         if conv <= rel_conv_tol:
             break
