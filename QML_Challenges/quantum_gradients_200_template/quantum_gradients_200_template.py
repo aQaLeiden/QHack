@@ -23,7 +23,7 @@ def gradient_200(weights, dev):
             * hessian is a real NumPy array of size (5, 5).
     """
 
-    @qml.qnode(dev, interface=None)
+    @qml.qnode(dev, interface=None, diff_method="parameter-shift")
     def circuit(w):
         for i in range(3):
             qml.RX(w[i], wires=i)
@@ -46,6 +46,52 @@ def gradient_200(weights, dev):
     hessian = np.zeros([5, 5], dtype=np.float64)
 
     # QHACK #
+    def apply_hessian_parameter_shift(qnode, params, i, j, unshifted, shift=np.pi/4):
+        if i != j:
+            shifted_plus = params.copy()
+            shifted_plus[i] += shift
+            shifted_plus[j] += shift
+            forward = qnode(shifted_plus)  # forward evaluation
+
+            shifted_min_plu = params.copy()
+            shifted_min_plu[i] -= shift
+            shifted_min_plu[j] += shift
+            min_plu = qnode(shifted_min_plu)
+
+            shifted_plu_min = params.copy()
+            shifted_plu_min[i] += shift
+            shifted_plu_min[j] -= shift
+            plu_min = qnode(shifted_plu_min)
+
+            shifted_minus = params.copy()
+            shifted_minus[i] -= shift
+            shifted_minus[j] -= shift
+            backward = qnode(shifted_minus)  # backward evaluation
+
+            return (forward - min_plu - plu_min + backward) / ((2*np.sin(shift))**2), None
+        else:
+            shifted_plus = params.copy()
+            shifted_plus[i] += np.pi/2
+            forward = qnode(shifted_plus)
+
+            shifted_minus = params.copy()
+            shifted_minus[i] -= np.pi/2
+            backward = qnode(shifted_minus)
+            result_hessian = (forward - 2*unshifted + backward) / 2
+            result_gradient = (forward - backward) / 2
+
+            return result_hessian, result_gradient
+
+    unshifted = circuit(weights)
+    for i in range(5):
+        for j in range(5):
+            if i <= j:
+                hess, grad = apply_hessian_parameter_shift(circuit, weights, i, j, unshifted, shift=np.pi / 4)
+                if i == j:
+                    gradient[i] = grad
+
+                hessian[i][j] = hess
+                hessian[j][i] = hess
 
     # QHACK #
 
