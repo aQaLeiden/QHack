@@ -24,14 +24,30 @@ def parameter_shift(weights):
 
     @qml.qnode(dev, diff_method="parameter-shift")
     def circuit(weights):
-        for i in range(len(weights)):
-            qml.RX(weights[i, 0], wires=0)
-            qml.RY(weights[i, 1], wires=1)
-            qml.RZ(weights[i, 2], wires=2)
+        # for i in range(len(weights)):
+        #     qml.RX(weights[i, 0], wires=0)
+        #     qml.RY(weights[i, 1], wires=1)
+        #     qml.RZ(weights[i, 2], wires=2)
+        #
+        #     qml.CNOT(wires=[0, 1])
+        #     qml.CNOT(wires=[1, 2])
+        #     qml.CNOT(wires=[2, 0])
 
-            qml.CNOT(wires=[0, 1])
-            qml.CNOT(wires=[1, 2])
-            qml.CNOT(wires=[2, 0])
+        qml.RX(weights[0], wires=0)
+        qml.RY(weights[1], wires=1)
+        qml.RZ(weights[2], wires=2)
+
+        qml.CNOT(wires=[0, 1])
+        qml.CNOT(wires=[1, 2])
+        qml.CNOT(wires=[2, 0])
+
+        qml.RX(weights[3], wires=0)
+        qml.RY(weights[4], wires=1)
+        qml.RZ(weights[5], wires=2)
+
+        qml.CNOT(wires=[0, 1])
+        qml.CNOT(wires=[1, 2])
+        qml.CNOT(wires=[2, 0])
 
         return qml.expval(qml.PauliY(0) @ qml.PauliZ(2))
 
@@ -48,7 +64,13 @@ def parameter_shift(weights):
 
         return 0.5 * (forward - backward)
 
-    gradient = [apply_parameter_shift(circuit, weights, i) for i in range(len(weights))]
+    params = []
+    for weight_arr in weights:
+        for val in weight_arr:
+            params.append(float(val))
+
+    gradient = [apply_parameter_shift(circuit, params, i) for i in range(len(params))]
+
     # QHACK #
 
     return gradient
