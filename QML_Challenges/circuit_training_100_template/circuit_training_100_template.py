@@ -30,36 +30,47 @@ def optimize_circuit(params):
     # QHACK #
 
     # Initialize the device
-    # dev = ...
+    dev = qml.device("default.qubit", wires=2)
+
+    @qml.qnode(dev)
+    def variational_circuit(params):
+        """
+        # DO NOT MODIFY anything in this function! It is used to judge your solution.
+
+        This is a template variational quantum circuit containing a fixed layout of gates with variable
+        parameters. To be used as a QNode, it must either be wrapped with the @qml.qnode decorator or
+        converted using the qml.QNode function (as shown above).
+
+        The output of this circuit is the expectation value of a Hamiltonian. An unknown Hamiltonian
+        will be used to judge your solution.
+
+        Args:
+            params (np.ndarray): An array of optimizable parameters of shape (30,)
+        """
+        parameters = params.reshape((LAYERS, WIRES, 3))
+        qml.templates.StronglyEntanglingLayers(parameters, wires=range(WIRES))
+        return qml.expval(qml.Hermitian(hamiltonian, wires=[0, 1]))
+
+    def cost(params):
+        expectation = variational_circuit(params)
+        return abs(0 - expectation)
 
     # Instantiate the QNode
-    # circuit = qml.QNode(variational_circuit, dev)
+    circuit = qml.QNode(variational_circuit, dev)
 
     # Minimize the circuit
+    opt = qml.AdagradOptimizer(stepsize=0.5)
+
+    for i in range(100):
+        params = opt.step(cost, params)
+
+    optimal_value = cost(params)
 
     # QHACK #
 
     # Return the value of the minimized QNode
     return optimal_value
 
-
-def variational_circuit(params):
-    """
-    # DO NOT MODIFY anything in this function! It is used to judge your solution.
-
-    This is a template variational quantum circuit containing a fixed layout of gates with variable
-    parameters. To be used as a QNode, it must either be wrapped with the @qml.qnode decorator or
-    converted using the qml.QNode function (as shown above).
-
-    The output of this circuit is the expectation value of a Hamiltonian. An unknown Hamiltonian
-    will be used to judge your solution.
-
-    Args:
-        params (np.ndarray): An array of optimizable parameters of shape (30,)
-    """
-    parameters = params.reshape((LAYERS, WIRES, 3))
-    qml.templates.StronglyEntanglingLayers(parameters, wires=range(WIRES))
-    return qml.expval(qml.Hermitian(hamiltonian, wires=[0, 1]))
 
 
 if __name__ == "__main__":
