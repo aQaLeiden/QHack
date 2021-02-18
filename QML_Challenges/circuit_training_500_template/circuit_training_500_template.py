@@ -3,6 +3,7 @@
 import sys
 import pennylane as qml
 import numpy as np
+from sklearn.metrics import mean_squared_error
 
 
 def classify_data(X_train, Y_train, X_test):
@@ -34,49 +35,36 @@ def classify_data(X_train, Y_train, X_test):
 
     # Install any pennylane-plugin to run on some particular backend
 
-
     @qml.qnode(dev)
-    def qcircuit(params, x, y):
-        """A variational quantum circuit representing the Universal classifier.
+    def qcircuit(params, x, depth):
+        qml.RX(x[0], wires=0)
+        qml.RX(x[1], wires=1)
+        qml.RX(x[2], wires=2)
 
-        Args:
-            params (array[float]): array of parameters
-            x (array[float]): single input vector
-            y (array[float]): single output state density matrix
+        params = list(params)
+        for layer in range(depth):
+            qml.Rot(params.pop(), params.pop(), params.pop(), wires=0)
+            qml.Rot(params.pop(), params.pop(), params.pop(), wires=1)
+            qml.Rot(params.pop(), params.pop(), params.pop(), wires=2)
 
-        Returns:
-            float: fidelity between output state and input
-        """
-        for p in params:
-            qml.Rot(*x, wires=0)
-            qml.Rot(*p, wires=0)
-        return qml.expval(qml.PauliZ(0))  # qml.Hermitian(y, wires=[0]))
+        return [qml.expval(qml.PauliZ(wires=0)), qml.expval(qml.PauliZ(wires=1)), qml.expval(qml.PauliZ(wires=2))]  # qml.Hermitian(y, wires=[0]))
 
-    def cost(params, x, y):
-        """Cost function to be minimized.
-
-        Args:
-            params (array[float]): array of parameters
-            x (array[float]): 2-d array of input vectors
-            y (array[float]): 1-d array of targets
-            state_labels (array[float]): array of state representations for labels
-
-        Returns:
-            float: loss value to be minimized
-        """
-        # Compute prediction for each input in data batch
+    def cost(params, x, y, depth):
         batch_loss = []
+        label_vecs = {
+            1: [1, 0, 0],
+            0: [0, 1, 0],
+            -1: [0, 0, 1]
+        }
+
         for i in range(len(x)):
-            f = qcircuit(params, x[i], y[i])
-            # print(type(f))
-            v = abs(y[i] - f) ** 2
-
+            f = qcircuit(params, x[i], depth=depth)
+            label = label_vecs[y[i]]
             try:
-
-                batch_loss.append(v._value)
-
+                m = mean_squared_error(label, list(f._value))
             except Exception:
-                batch_loss.append(v)
+                m = mean_squared_error(label, list(f))
+            batch_loss.append(m)
 
         return np.mean(batch_loss)
 
@@ -96,7 +84,7 @@ def classify_data(X_train, Y_train, X_test):
             idxs = slice(start_idx, start_idx + batch_size)
             yield inputs[idxs], targets[idxs]
 
-    num_layers = 5
+    num_layers = 2
     learning_rate = 0.1
     epochs = 50
     batch_size = 20
@@ -104,15 +92,13 @@ def classify_data(X_train, Y_train, X_test):
     opt = qml.AdamOptimizer(learning_rate, beta1=0.9, beta2=0.999)
 
     # initialize random weights
-    params = np.random.uniform(size=(num_layers, 3))
-
-    # loss = cost(params, X_train, Y_train)
+    params = [np.random.uniform(0, np.pi) for _ in range(3*3*num_layers)]
 
     for it in range(epochs):
         for Xbatch, ybatch in iterate_minibatches(X_train, Y_train, batch_size=batch_size):
-            params = opt.step(lambda v: cost(v, Xbatch, ybatch), params)
+            params = opt.step(lambda v: cost(v, Xbatch, ybatch, num_layers), params)
 
-        loss = np.mean(cost(params, X_train, Y_train))
+        loss = np.mean(cost(params, X_train, Y_train, num_layers))
 
         res = [it + 1, loss]
         print(
