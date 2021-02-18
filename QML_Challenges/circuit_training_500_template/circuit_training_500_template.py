@@ -47,7 +47,7 @@ def classify_data(X_train, Y_train, X_test):
             qml.Rot(params.pop(), params.pop(), params.pop(), wires=1)
             qml.Rot(params.pop(), params.pop(), params.pop(), wires=2)
 
-        return [qml.expval(qml.PauliZ(wires=0)), qml.expval(qml.PauliZ(wires=1)), qml.expval(qml.PauliZ(wires=2))]  # qml.Hermitian(y, wires=[0]))
+        return [qml.expval(qml.PauliZ(wires=0)), qml.expval(qml.PauliZ(wires=1)), qml.expval(qml.PauliZ(wires=2))]
 
     def cost(params, x, y, depth):
         batch_loss = []
@@ -66,6 +66,7 @@ def classify_data(X_train, Y_train, X_test):
                 m = mean_squared_error(label, list(f))
             batch_loss.append(m)
 
+        print(np.mean(batch_loss))
         return np.mean(batch_loss)
 
     def iterate_minibatches(inputs, targets, batch_size):
@@ -94,10 +95,15 @@ def classify_data(X_train, Y_train, X_test):
     # initialize random weights
     params = [np.random.uniform(0, np.pi) for _ in range(3*3*num_layers)]
 
-    for it in range(epochs):
-        for Xbatch, ybatch in iterate_minibatches(X_train, Y_train, batch_size=batch_size):
-            params = opt.step(lambda v: cost(v, Xbatch, ybatch, num_layers), params)
+    X_train = X_train[:20]
+    Y_train = Y_train[:20]
 
+    for it in range(epochs):
+        # for Xbatch, ybatch in iterate_minibatches(X_train, Y_train, batch_size=batch_size):
+        #     params = opt.step(lambda v: cost(v, Xbatch, ybatch, num_layers), params)
+
+        print(params)
+        params = opt.step(lambda v: cost(v, X_train, Y_train, num_layers), params)
         loss = np.mean(cost(params, X_train, Y_train, num_layers))
 
         res = [it + 1, loss]
