@@ -21,10 +21,7 @@ def find_excited_states(H):
     energies = np.zeros(3)
 
     # QHACK #
-    # import time
-    # clock = time.time()
-
-    def variational_ansatz(params, wires):
+    def variational_ansatz(params, wires, *, state_n):
         """
         Args:
             params (np.ndarray): An array of floating-point numbers with size (n, 3),
@@ -35,6 +32,10 @@ def find_excited_states(H):
         n_qubits = len(wires)
         n_rotations = len(params)
 
+        state = np.repeat([0], n_qubits)
+        state[0:state_n] = 1
+        qml.BasisState(state, wires=wires)
+
         if n_rotations > 1:
             n_layers = n_rotations // n_qubits
             n_extra_rots = n_rotations - n_layers * n_qubits
@@ -44,12 +45,10 @@ def find_excited_states(H):
             for layer_idx in range(n_layers):
                 layer_params = params[layer_idx *
                                       n_qubits: layer_idx * n_qubits + n_qubits, :]
-                qml.broadcast(qml.Rot, wires, pattern="single",
-                              parameters=layer_params)
-                # qml.broadcast(qml.RY, wires, pattern="single",
-                #               parameters=layer_params[:, 0])
-                # qml.broadcast(qml.RZ, wires, pattern="single",
-                #               parameters=layer_params[:, 1])
+                qml.broadcast(qml.RY, wires, pattern="single",
+                              parameters=layer_params[:, 0])
+                qml.broadcast(qml.RZ, wires, pattern="single",
+                              parameters=layer_params[:, 1])
                 qml.broadcast(qml.CNOT, wires, pattern="ring")
 
             if n_extra_rots > 0:
@@ -57,136 +56,76 @@ def find_excited_states(H):
                 # to perform another full alternating cycle. Apply these to the qubits as needed.
                 extra_params = params[-n_extra_rots:, :]
                 extra_wires = wires[: n_qubits - 1 - n_extra_rots: -1]
-                qml.broadcast(qml.Rot, extra_wires, pattern="single",
-                              parameters=extra_params)
-                # qml.broadcast(qml.RY, extra_wires, pattern="single",
-                #               parameters=extra_params[:, 0])
-                # qml.broadcast(qml.RZ, extra_wires, pattern="single",
-                #               parameters=extra_params[:, 1])
+                qml.broadcast(qml.RY, extra_wires, pattern="single",
+                              parameters=extra_params[:, 0])
+                qml.broadcast(qml.RZ, extra_wires, pattern="single",
+                              parameters=extra_params[:, 1])
         else:
             # For 1-qubit case, just a single rotation to the qubit
             qml.Rot(*params[0], wires=wires[0])
-
-    # SET UP
 
     num_qubits = len(H.wires)
 
     dev = qml.device('default.qubit', wires=num_qubits)
 
-    num_param_sets = num_qubits * 2
+    from functools import partial
+    cost_fns = [qml.ExpvalCost(partial(variational_ansatz, state_n=i), H, dev)
+                for i in [0, 1, 2]]
 
     opt = qml.AdamOptimizer(stepsize=0.4)
     # print('opt = qml.AdamOptimizer(stepsize=0.4)')
 
-    #np.random.seed(0)
+    max_iterations = 500
+    rel_conv_tol = 1e-6
+
+    num_param_sets = num_qubits ** 2
+    # np.random.seed(1234)
     params = np.random.uniform(low=-np.pi / 2, high=np.pi / 2,
-                               size=(num_param_sets, 3))
-    # params = np.array(
-    #     [[-7.59242872e-01, -1.57079693e+00,  3.14161520e+00],
-    #      [ 1.60832297e-01, -1.57169232e+00, -3.35098934e-05],
-    #      [ 5.62685800e-01, -1.57074646e+00, -3.14152854e+00],
-    #      [-2.39391497e-02, -3.14159454e+00, -2.37179610e-02],
-    #      [ 1.57735149e+00,  3.17535756e+00, -1.56409095e+00],
-    #      [ 8.89491742e-01, -1.56405184e-01,  2.24609453e+00]])
+                               size=(num_param_sets, 2))
 
+    import time
+    clock = time.time()
 
-    ##### first opimization for GS
-
-    cost_fn = qml.ExpvalCost(variational_ansatz, H, dev)
-
-    max_iterations = 300
-    rel_conv_tol = 1e-6
+    weights = np.array([3., 2., 1.])
+    weights = weights / np.sum(weights)
 
     for n in range(max_iterations):
+
+        def cost_fn(params):
+            return [cost_fn(params) for cost_fn in cost_fns] @ weights
         params, prev_cost = opt.step_and_cost(cost_fn, params)
         cost = cost_fn(params)
         conv = np.abs((cost - prev_cost) / cost)
 
         # DEBUG PRINT
         if n % 20 == 0:
-            energies[0] = cost
-            # print(f'Iteration = {n}, cost = {cost}, energies = ', energies,
-            #       f'time {time.time() - clock:.0f}s')
+            energies = [cf(params) for cf in cost_fns]
+            print(f'Iteration = {n}, cost = {cost} energies = ', energies,
+                  f'time {time.time() - clock:.0f}s')
+            energies = np.sort(energies)
+            alpha = 0.1
+            weights = np.array(
+                [1 + alpha/(energies[2]-energies[1]) 
+                 + alpha/(energies[1]-energies[0]),
+                 1 + alpha/(energies[2]-energies[1]),
+                 1]
+            )
+            weights /= np.sum(weights)
+            print('new weights:', weights)
 
         if (conv <= rel_conv_tol) and (n % 20 == 1):
             break
-    energies[0] = cost
 
-    ground_state = dev.state
+        energies = sorted(list([cf(params) for cf in cost_fns]))
 
+    # from scipy.optimize import minimize
+    # cf_for_scipy = lambda params: cost_fn(np.reshape(params, (-1, 3)))
+    # res = minimize(cf_for_scipy, np.ravel(params), method='COBYLA',
+    #                options=dict(maxiter=1000))
+    # print(res)
+    # print('energies: ', [cf(np.reshape(res['x'], (-1, 3))) for cf in cost_fns])
 
-    ##### second opimization for FES
-    # params = np.random.uniform(low=-np.pi / 2, high=np.pi / 2,
-    #                            size=(num_param_sets, 3))
-
-    opt = qml.AdamOptimizer(stepsize=0.4)
-
-    def costs(params):
-        energy_cost = qml.ExpvalCost(variational_ansatz, H, dev)(params)
-        state = dev.state
-        gs_cost = abs(sum(a * np.conj(b)
-                      for a, b in zip(state, ground_state))) ** 2
-        return energy_cost, gs_cost
-    cost_fn = lambda params: sum(costs(params))
-
-    max_iterations = 300
-    rel_conv_tol = 1e-6
-
-    for n in range(max_iterations):
-        params, prev_cost = opt.step_and_cost(cost_fn, params)
-        cost = cost_fn(params)
-        conv = np.abs((cost - prev_cost) / cost)
-
-        # DEBUG PRINT
-        if n % 20 == 0:
-            energies[1] = costs(params)[0]
-            # print(f'Iteration = {n}, cost = {cost}, energies = ', energies,
-            #       f'time {time.time() - clock:.0f}s')
-
-        if (conv <= rel_conv_tol) and (n % 20 == 1):
-            break
-    energies[1] = costs(params)[0]
-    first_excited_state = dev.state
-
-    # print('FES', first_excited_state)
-
-
-    ##### third opimization for SES
-    # params = np.random.uniform(low=-np.pi / 2, high=np.pi / 2,
-    #                            size=(num_param_sets, 3))
-
-    opt = qml.AdamOptimizer(stepsize=0.4)
-
-    def costs(params):
-        energy_cost = qml.ExpvalCost(variational_ansatz, H, dev)(params)
-        state = dev.state
-        gs_cost = abs(sum(a * np.conj(b)
-                      for a, b in zip(state, ground_state))) ** 2
-        fes_cost = abs(sum(a * np.conj(b)
-                      for a, b in zip(state, first_excited_state))) ** 2
-        return energy_cost, gs_cost, fes_cost
-    cost_fn = lambda params: sum(costs(params))
-
-    max_iterations = 300
-    rel_conv_tol = 1e-6
-
-    for n in range(max_iterations):
-        params, prev_cost = opt.step_and_cost(cost_fn, params)
-        cost = cost_fn(params)
-        conv = np.abs((cost - prev_cost) / cost)
-
-        # DEBUG PRINT
-        if n % 20 == 0:
-            energies[2] = costs(params)[0]
-            # print(f'Iteration = {n}, cost = {cost}, energies = ', energies,
-            #       f'time {time.time() - clock:.0f}s')
-
-        if (conv <= rel_conv_tol) and (n % 20 == 1):
-            break
-    energies[2] = costs(params)[0]
-
-
-    # print(f'tot time: ', time.time() - clock)
+    print(f'tot time: ', time.time() - clock)
 
     # QHACK #
 
